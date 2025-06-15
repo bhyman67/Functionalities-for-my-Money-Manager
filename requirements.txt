@@ -1,0 +1,8 @@
+robin-stocks
+xlwings
+selenium
+python-dateutil
+coinbase
+PyPDF2
+pandas
+openpyxl

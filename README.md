@@ -2,7 +2,7 @@
     <p align="center">Money Manager Script</p>
 </h1>
 
-This Python script is designed to assist in managing financial transactions, investments, and eStatements by automating various tasks such as retrieving transaction data from online banking platforms, categorizing transactions, fetching investment information from Robinhood and Coinbase, and downloading eStatements from online banking portals.
+This Python script is designed to retrieve and prep financial data for my custom Excel Money Manager tool which I use for managing financial transactions, investments, and eStatements. Tasks that are automated include retrieving transaction data from online banking platforms, categorizing transactions, fetching investment information from Robinhood and Coinbase, and downloading eStatements from online banking portals.
 
 <div style="text-align: center;">
     <img src="Money%20Manager%20Pic.webp" alt="Money Manager Logo" width="500"/>

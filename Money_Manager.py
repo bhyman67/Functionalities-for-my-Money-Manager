@@ -1,5 +1,8 @@
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
 from dateutil.relativedelta import relativedelta
 from coinbase.wallet.client import Client
+from coinbase.rest import RESTClient
 from datetime import datetime, timedelta
 import robin_stocks.robinhood as rh
 from selenium import webdriver
@@ -51,7 +54,8 @@ def PDFmerge(pdfs, output_pdf_name):
     with open(output_pdf_name, 'wb') as f:
         pdfMerger.write(f)
 
-def extract_and_remove_date(description):
+def extract_and_remove_date(description, post_date):
+
     full_pattern = r'\bON\s\d{2}-\d{2}\s\d{4}\b'
     date_pattern = r'\s\d{2}-\d{2}'
     match = re.search(date_pattern, description)
@@ -60,7 +64,12 @@ def extract_and_remove_date(description):
         description_without_date = re.sub(full_pattern, '', description)
         return date, description_without_date.strip()
     else:
-        return None, description
+        # Format post_date as ' MM-DD' (with leading space to match extracted format)
+        try:
+            formatted_date = post_date.strftime(' %m-%d')
+        except Exception:
+            formatted_date = str(post_date)  # fallback if not datetime-like
+        return formatted_date, description
 
 class Money_Manager:
 
@@ -120,13 +129,13 @@ class Money_Manager:
 
             self.wb.app.quit()
 
-    def retrieve_data(self, otp): # rename this function... 
+    def retrieve_data(self): # rename this function... 
 
         # You need to put the error handling back into this scraping routine... 
 
         # Grab what you need from Robinhood
-        login = rh.authentication.login(self.robinhood_u, self.robinhood_p, mfa_code = otp)
-        self.wb.sheets["Overview"].range( self.account3_name.replace(" ","_") ).value = rh.profiles.load_account_profile()["cash_available_for_withdrawal"]
+        login = rh.authentication.login(self.robinhood_u, self.robinhood_p) 
+        self.wb.sheets["Personal Investment Portfolio"].range( self.account3_name.replace(" ","_") ).value = rh.profiles.load_account_profile()["cash_available_for_withdrawal"]
         brokerage_interest_income_json_resp = rh.request_get("https://api.robinhood.com/accounts/sweeps")
         rh.authentication.logout()
 
@@ -175,54 +184,56 @@ class Money_Manager:
         accounts.append( '{{accountType={account_name}, selectedNumber=9e720c749c446ee65976669a391134fb}}'.format(account_name = self.account2_name) )
         accounts.append( '{{accountType={account_name}, selectedNumber=8c4a6dff17073338f88e3f5b3ae117a2}}'.format(account_name = self.credit_card_account_name) )
 
-        # Get your creds for online banking and instantiate the webdriver obj
-        browser = webdriver.Chrome( executable_path = self.wb.sheets["Script Control Center & Ref Dta"].range("Chromedriver").value )
+        # Instantiate the webdriver object
+        service = webdriver.chrome.service.Service(self.wb.sheets["Script Control Center & Ref Dta"].range("Chromedriver").value)
+        browser = webdriver.Chrome(service=service)
         browser.implicitly_wait(30)
 
         # Login to OB (is there a way to use credentials that are saved in the browser???)
         browser.get('https://www.efirstbank.com/')
-        browser.find_element_by_id('userId').send_keys(self.firstbank_u)
-        browser.find_element_by_id('password').send_keys(self.firstbank_p)
-        browser.find_element_by_id('logIn').click()
+        browser.find_element(By.ID, 'userId').send_keys(self.firstbank_u)
+        browser.find_element(By.ID, 'password').send_keys(self.firstbank_p)
+        browser.find_element(By.ID, 'logIn').click()
 
         # Grab account totals 
         # Current balance from account 1 
         time.sleep(10)
-        browser.find_element_by_xpath('//*[@id="js-acct-name"]/span[1]')
-        account1_current_balance = browser.find_element_by_xpath('//*[@id="js-ob-details-container"]/div/div/div[3]/div/div[2]/div[1]/ul/li[1]/strong/span').text
+        browser.find_element(By.XPATH, '//*[@id="js-acct-name"]/span[1]')
+        account1_current_balance = browser.find_element(By.XPATH, '//*[@id="js-ob-details-container"]/div/div/div[3]/div/div[2]/div[1]/ul/li[1]/strong/span').text
         # Click on account 2 and then grab the current balance from that
-        browser.find_element_by_xpath('//*[@id="js-product-id-10620720"]/div[2]/div[1]/div/div[1]/p/span').click()
+        browser.find_element(By.XPATH, '//*[@id="js-product-id-10620720"]/div[2]/div[1]/div/div[1]/p/span').click()
         time.sleep(3)
-        account2_current_balance = browser.find_element_by_xpath('//*[@id="js-ob-details-container"]/div/div/div[3]/div/div[2]/div[1]/ul/li[1]/strong/span').text
+        account2_current_balance = browser.find_element(By.XPATH, '//*[@id="js-ob-details-container"]/div/div/div[3]/div/div[2]/div[1]/ul/li[1]/strong/span').text
 
         # Pull data for each account
         html_tables = []
         for account in enumerate(accounts):
 
             # Pull up the "Download Account Info" page
-            # browser.find_element_by_link_text('Online Banking').click()
-            browser.find_element_by_xpath('//*[@id="obTab"]/a').click()
+
+            # Click on the account tab
+            browser.find_element(By.XPATH, '//*[@id="obTab"]/a').click()
             time.sleep(1)
-            browser.find_element_by_link_text('Downloads').click()
+            browser.find_element(By.LINK_TEXT, 'Downloads').click()
 
             # Select account
-            browser.find_element_by_name('accountSelected').click()
-            browser.find_element_by_xpath(f"//option[@value = '{account[1]}']").click()
+            browser.find_element(By.NAME, 'accountSelected').click()
+            browser.find_element(By.XPATH, f"//option[@value = '{account[1]}']").click()
 
             # Set the date range (format is mm/dd/yyyy)
-            browser.find_element_by_id('dateRangeRadio').click()
+            browser.find_element(By.ID, 'dateRangeRadio').click()
             if account[0] == 0 or account[0] == 1:
                 account = account[1].split(',')[0].split('=')[1].split(" ")[1]
             else:
                 account = account[1].split(',')[0].split('=')[1]
-            browser.find_element_by_name('fromDate').send_keys(firstOfPrevMnth)
-            browser.find_element_by_name('toDate').send_keys(crntDt)
+            browser.find_element(By.NAME, 'fromDate').send_keys(firstOfPrevMnth)
+            browser.find_element(By.NAME, 'toDate').send_keys(crntDt)
 
             # click  the view txns button
-            browser.find_element_by_xpath("//input[@value='View Transactions']").click()
+            browser.find_element(By.XPATH, "//input[@value='View Transactions']").click()
 
             # Find one of these two elements B4 the scrape to ensure that the page loads first
-            elmnt_txt = browser.find_element_by_xpath("//table[@class='detail dataTable'] | //*[@id='contentContainer']/div[2]/div/p").text
+            elmnt_txt = browser.find_element(By.XPATH, "//table[@class='detail dataTable'] | //*[@id='contentContainer']/div[2]/div/p").text
 
             if "No transactions were found in the specified range." in elmnt_txt:
 
@@ -246,7 +257,7 @@ class Money_Manager:
             "(":"-",
             ")":""
         }
-        txns_df["Amount"] = txns_df["Amount"].replace('[\$,)]', '', regex=True).replace('[(]','-',regex=True).astype(float)
+        txns_df["Amount"] = txns_df["Amount"].replace(r'[\$,)]', '', regex=True).replace(r'[(]', '-', regex=True).astype(float) # txns_df["Amount"] = txns_df["Amount"].replace('[\$,)]', '', regex=True).replace('[(]','-',regex=True).astype(float)
 
         # Add a credit/debit indicator column and an income/expence exclude indicator column
         desc_excludes = self.wb.sheets("Script Control Center & Ref Dta").range("Table2").value
@@ -259,13 +270,14 @@ class Money_Manager:
 
         # Log out and close both the browser and db cnxn
         time.sleep(2)
-        browser.find_element_by_xpath("//span[@data-i18n = 'main:Log Out']").click()
+        browser.find_element(By.XPATH, "//span[@data-i18n = 'main:Log Out']").click()
         browser.quit()
 
         txns_df = pd.concat([txns_df, brokerage_interest_income])
 
         self.wb.sheets["Overview"].range( self.account1_name.replace(" ","_") ).value = float(account1_current_balance.replace("$","").replace(",","").strip())
         self.wb.sheets["Overview"].range( self.account2_name.replace(" ","_") ).value = float(account2_current_balance.replace("$","").replace(",","").strip())
+        # Right here, you could write to a csv, instead of writing to the workbook
         self.wb.sheets["All Bank Transactions"].range('A1').options(pd.DataFrame, index = False).value = txns_df
         self.wb.sheets["All Bank Transactions"].range('A1').current_region.autofit()
 
@@ -285,6 +297,7 @@ class Money_Manager:
         df.loc[(df["Account"] == "Robinhood Brokerage") & (df["Credit_Debit_Ind"] == "Credit"), "Income_Expense_Ind"] = "Income"
 
         # Flip the sign on all amounts to be positive (for credit card txns that show negetive amts)
+        # Convert the column to a numeric type and format as Accounting (in Excel), too. - maybe do this later...
         df["Amount"] = df["Amount"].apply(abs)
 
         # drop these cols "Income_Expense_Exclude","Credit_Debit_Ind"
@@ -295,7 +308,10 @@ class Money_Manager:
 
         # Clean up the description col
         df["Description"] = df["Description"].apply(lambda x: remove_visa(x))
-        df['Txn Month/Day'], df['Description'] = zip(*df['Description'].apply(extract_and_remove_date))
+        df[['Txn Month/Day', 'Description']] = df.apply(
+            lambda row: extract_and_remove_date(row['Description'], row['Date']),
+            axis=1, result_type='expand'
+        )
 
         # Add description category col
         df["Description_Category"] = ""
@@ -318,20 +334,44 @@ class Money_Manager:
             "Description Category"
         ]]
         
+        # Replace txns for the HOA roof replacement
+        incoming_txn = df[
+            (df["Amount"] == 16815.39) & (df["Income or Expense"] == "Income") & (df["Post Date"] == "02/24/2025")
+        ]
+        outgoing_txn = df[
+            (df["Amount"] == 17316.39) & (df["Income or Expense"] == "Expense") & (df["Post Date"] == "02/25/2025")
+        ] 
+        df.drop(incoming_txn.index, inplace = True)
+        df.drop(outgoing_txn.index, inplace = True)
+        new_txn = pd.DataFrame([{
+            "Post Date": outgoing_txn["Post Date"].values[0],
+            "Txn Month/Day": outgoing_txn["Txn Month/Day"].values[0],
+            "Account": outgoing_txn["Account"].values[0],
+            "Amount": 500,
+            "Description": "Safeco Insurance Deductible - HOA Roof Replacement",
+            "Type": outgoing_txn["Type"].values[0],
+            "Income or Expense": "Expense",
+            "Description Category": ""
+        }])
+        df = pd.concat([df, new_txn], ignore_index=True)
+
+        # Sort the df by date (descending)
+        df = df.sort_values(by = "Post Date", ascending = False)
+
         # Write the df to the Income and Expensess tab and make it a data table
         self.wb.sheets["Income and Expense Tracking"].tables("transactions").range.clear()
         self.wb.sheets["Income and Expense Tracking"].range('A1').options(pd.DataFrame, index = False).value = df
         self.wb.sheets["Income and Expense Tracking"].tables.add(source = self.wb.sheets["Income and Expense Tracking"].range("A1").current_region, name = "transactions")
         self.wb.sheets["Income and Expense Tracking"].range('A1').current_region.autofit()
 
-    def get_investments_v1(self, otp):
+    def get_investments_v1(self): 
 
         # provide option to pull all time investment data from Robinhood and Coinbase (from file...)
 
         # +++ Robinhood +++
 
         # Login
-        login = rh.authentication.login(self.robinhood_u, self.robinhood_p, mfa_code = otp)
+        login = rh.authentication.login(self.robinhood_u, self.robinhood_p) 
 
         # Get holdings data
         holdings_data = rh.account.build_holdings()
@@ -359,18 +399,19 @@ class Money_Manager:
         # +++ Coinbase +++
 
         # Get all your crypto accounts
-        client = Client(self.coinbase_key_id, self.coinbase_key_secret)
-        crypto_accounts = client.get_accounts()["data"]
+        client0 = Client("0", "0")
+        client = RESTClient(api_key=self.coinbase_key_id, api_secret=self.coinbase_key_secret)
+        crypto_accounts = client.get_accounts()["accounts"]
         # Build a list of tuples
         crypto_accounts_with_balances = []
         for crypto_account in crypto_accounts:
 
-            if float(crypto_account["balance"]["amount"]) > 0:
+            if float(crypto_account["available_balance"]["value"]) > 0:
             
-                crypto_symbol = crypto_account["balance"]["currency"]
+                crypto_symbol = crypto_account["available_balance"]["currency"]
                 crypto_name = crypto_account["name"]
-                crypto_quantity = crypto_account["balance"]["amount"]
-                crypto_exchange_rate = client.get_exchange_rates(currency=crypto_symbol)["rates"]["USD"]
+                crypto_quantity = crypto_account["available_balance"]["value"]
+                crypto_exchange_rate = client0.get_exchange_rates(currency=crypto_symbol)["rates"]["USD"] # need to fix this
                 crypto_equity = str(float(crypto_exchange_rate) * float(crypto_quantity))
 
                 crypto_accounts_with_balances.append(
@@ -400,7 +441,7 @@ class Money_Manager:
 
         # Write holdings data to the workbook and make it a table
         holdings_table_address = self.wb.sheets["Personal Investment Portfolio"].tables["holdings"].range.address
-        self.wb.sheets["Personal Investment Portfolio"].range( re.sub('\$(\d+)$', increment, holdings_table_address) ).delete(shift = 'up')
+        self.wb.sheets["Personal Investment Portfolio"].range(re.sub(r'\$(\d+)$', increment, holdings_table_address)).delete(shift='up') 
         self.wb.sheets["Personal Investment Portfolio"].range("A1").options(index=False).value = df
         self.wb.sheets["Personal Investment Portfolio"].tables.add(source = self.wb.sheets["Personal Investment Portfolio"].range("A1").current_region, name = "holdings")
         self.wb.sheets["Personal Investment Portfolio"].range("A1").current_region.autofit()
@@ -455,7 +496,6 @@ class Money_Manager:
             current_statement_in_ob_path_list = [account1_stmt_path,account2_stmt_path,account3_stmt_path,credit_card_stmt_path]
 
             # Navigate to the eStatements in online banking
-            # browser.find_element_by_link_text('Online Banking').click()
             browser.find_element_by_xpath('//*[@id="obTab"]/a').click()
             browser.find_element_by_link_text('eStatements').click()
 
